@@ -18,6 +18,7 @@ struct DestinationsView: View {
                 Text("软件直接连接每个目的地，不经过强制中转。第三方只需实现 Nowbeam v1 上报协议，不必实现接收服务管理 API。")
                     .foregroundStyle(.secondary)
                 Button("添加接收端…", systemImage: "plus") { editor = Editor(destination: nil) }
+                    .glassAction()
             }
             if model.configuration.destinations.isEmpty {
                 Section {
@@ -25,7 +26,7 @@ struct DestinationsView: View {
                 }
             }
             ForEach(model.configuration.destinations) { destination in
-                Section(destination.name) {
+                Section {
                     DestinationRow(model: model, destination: destination,
                         changeEnabled: { enabled in
                             if enabled { enabling = destination }
@@ -34,8 +35,13 @@ struct DestinationsView: View {
                         edit: { editor = Editor(destination: destination) },
                         remove: { removing = destination }
                     )
+                    .padding(.vertical, 2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                } header: {
+                    Text(destination.name)
                 }
             }
+            .animation(.snappy(duration: 0.3), value: model.configuration.destinations)
         }
         .formStyle(.grouped)
         .sheet(item: $editor) { context in DestinationEditor(model: model, existing: context.destination) }
@@ -64,36 +70,88 @@ private struct DestinationRow: View {
     @State private var probing = false
     @State private var probeResult: String?
 
+    private var status: ConnectionStatus? { model.statuses[destination.id] }
+    private var confirmed: Bool { status?.phase == .confirmed }
+
+    private var statusBadge: StatusBadge {
+        switch status?.phase {
+        case .confirmed: StatusBadge(text: "已确认", symbol: "checkmark.circle.fill", color: .green)
+        case .ready, .connecting: StatusBadge(text: status?.message ?? "连接中，尚未确认", symbol: "link", color: .accentColor)
+        case .retrying: StatusBadge(text: status?.message ?? "等待重连", symbol: "arrow.clockwise", color: .orange)
+        case .blocked: StatusBadge(text: status?.message ?? "需要处理授权或连接问题", symbol: "exclamationmark.triangle", color: .orange)
+        default: StatusBadge(text: status?.message ?? "未启用，未发送任何活动。", symbol: "circle.dashed", color: .secondary)
+        }
+    }
+
     var body: some View {
-        Toggle("启用此目的地", isOn: Binding(get: { destination.enabled }, set: changeEnabled))
-        Text(destination.endpoint).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-        let status = model.statuses[destination.id]
-        Label(status?.message ?? "未启用，未发送任何活动。", systemImage: status?.phase == .confirmed ? "checkmark.circle" : "circle")
-            .foregroundStyle(status?.phase == .confirmed ? Color.green : Color.secondary)
-        if let date = status?.lastAcknowledgedAt {
-            LabeledContent("最近一次接收方确认", value: date.formatted(date: .abbreviated, time: .standard))
-        }
-        if let probeResult { Text(probeResult).font(.callout).textSelection(.enabled) }
-        HStack {
-            Button(probing ? "检查中…" : "检查连接") {
-                probing = true
-                probeResult = nil
-                Task {
-                    do {
-                        _ = try await model.probeDestination(destination)
-                        probeResult = "身份和协议已验证；没有发送快照，也没有接管已有连接。"
-                    } catch { probeResult = model.safeMessage(error) }
-                    probing = false
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: confirmed ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(destination.enabled ? Color.accentColor : Color.secondary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(.snappy(duration: 0.3), value: destination.enabled)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(destination.name).font(.headline)
+                    Text(destination.endpoint)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled)
                 }
+                Spacer(minLength: 8)
+                Toggle("启用此目的地", isOn: Binding(get: { destination.enabled }, set: changeEnabled))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .fixedSize()
             }
-            .disabled(probing)
-            if destination.enabled {
-                Button("重新连接") { model.reconnect(destination.id) }
+            statusBadge
+                .symbolEffect(.bounce, value: status?.phase)
+                .symbolEffect(.pulse, options: .repeating, isActive: status?.phase == .connecting || status?.phase == .retrying)
+            if let date = status?.lastAcknowledgedAt {
+                KeyValueRow(label: "最近一次接收方确认", value: date.formatted(date: .abbreviated, time: .standard))
             }
-            Spacer()
-            Button("重新配置…", action: edit)
-            Button("移除…", role: .destructive, action: remove)
+            if let probeResult {
+                Text(probeResult)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            HStack(spacing: 8) {
+                Button {
+                    probing = true
+                    probeResult = nil
+                    Task {
+                        do {
+                            _ = try await model.probeDestination(destination)
+                            probeResult = "身份和协议已验证；没有发送快照，也没有接管已有连接。"
+                        } catch { probeResult = model.safeMessage(error) }
+                        probing = false
+                    }
+                } label: {
+                    Label(probing ? "检查中…" : "检查连接", systemImage: probing ? "hourglass" : "stethoscope")
+                }
+                .glassAction()
+                .disabled(probing)
+                if destination.enabled {
+                    Button { model.reconnect(destination.id) } label: {
+                        Label("重新连接", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .glassAction()
+                }
+                Spacer(minLength: 8)
+                Menu {
+                    Button("重新配置…", systemImage: "slider.horizontal.3", action: edit)
+                    Button("移除…", systemImage: "trash", role: .destructive, action: remove)
+                } label: {
+                    Label("更多", systemImage: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
         }
+        .animation(.snappy(duration: 0.25), value: probeResult)
+        .animation(.snappy(duration: 0.25), value: status?.phase)
     }
 }
 
@@ -122,7 +180,7 @@ private struct DestinationEditor: View {
                 .font(.callout).foregroundStyle(.secondary)
             if let result { Text(result).font(.callout).textSelection(.enabled) }
             HStack {
-                Button(probing ? "检查中…" : "只检查连接") {
+                Button {
                     probing = true
                     result = nil
                     Task {
@@ -132,14 +190,17 @@ private struct DestinationEditor: View {
                         } catch { result = model.safeMessage(error) }
                         probing = false
                     }
+                } label: {
+                    Label(probing ? "检查中…" : "只检查连接", systemImage: "stethoscope")
                 }
+                .glassAction()
                 .disabled(endpoint.isEmpty || token.isEmpty || probing)
                 Spacer()
                 Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("保存为未启用") {
                     if model.saveDestination(replacing: existing, name: name, endpoint: endpoint, token: token) { dismiss() }
                 }
-                .buttonStyle(.borderedProminent)
+                .prominentAction()
                 .disabled(name.isEmpty || endpoint.isEmpty || token.isEmpty || probing)
                 .keyboardShortcut(.defaultAction)
             }

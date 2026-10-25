@@ -35,17 +35,30 @@ struct ReceiverView: View {
             }
             if let receiver = administration.receiver {
                 Section("管理连接") {
-                    Text(receiver.baseURL).textSelection(.enabled)
+                    KeyValueRow(label: "服务地址", value: receiver.baseURL, monospaced: true)
                     if administration.busy { ProgressView("正在与接收服务通信…") }
-                    if let notice = administration.notice { Text(notice).font(.callout).textSelection(.enabled) }
-                    HStack {
-                        Button("刷新") { Task { await administration.select(receiver.id) } }
-                        Button("复制管理凭证") { administration.copyOwnerCredential() }
-                        Spacer()
+                    if let notice = administration.notice {
+                        Label(notice, systemImage: "bubble.left.and.text.bubble.right")
+                            .font(.callout).textSelection(.enabled)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    HStack(spacing: 8) {
+                        Button { Task { await administration.select(receiver.id) } } label: {
+                            Label("刷新", systemImage: "arrow.clockwise")
+                        }
+                        .glassAction()
+                        Button {
+                            administration.copyOwnerCredential()
+                        } label: {
+                            Label("复制管理凭证", systemImage: "doc.on.doc")
+                        }
+                        .glassAction()
+                        Spacer(minLength: 8)
                         Button("移除本机管理连接…", role: .destructive) { confirmRemoval = true }
                     }
                     .disabled(administration.busy)
                 }
+                .animation(.snappy(duration: 0.25), value: administration.notice)
                 if administration.loaded {
                     Section("公开读取") {
                         Toggle("允许匿名读取当前状态", isOn: $administration.settings.publicReadEnabled)
@@ -60,42 +73,34 @@ struct ReceiverView: View {
                                 confirmPublic = true
                             } else { Task { await administration.saveSettings() } }
                         }
+                        .prominentAction()
                     }
                     .disabled(administration.busy)
                     Section("授权设备") {
-                        HStack {
+                        HStack(spacing: 8) {
                             TextField("公开设备名称", text: $deviceName)
                             Button("签发设备凭证") { Task { await administration.createDevice(name: deviceName) } }
+                                .prominentAction()
                                 .disabled(deviceName.isEmpty || administration.issued != nil)
                         }
                         Text("设备名由你填写，不自动使用主机名或硬件标识。设备凭证只用于上报，不能管理实例。")
                             .font(.callout).foregroundStyle(.secondary)
                         if let issued = administration.issued {
-                            LabeledContent("新授权设备", value: issued.device.displayName)
-                            SecureField("一次性返回的设备凭证", text: .constant(issued.token))
-                            HStack {
-                                Button("复制设备凭证") { administration.copyIssuedCredential() }
-                                Button("添加到本机接收端，暂不启用") { administration.addIssuedToThisMac() }
-                            }
-                            Text("刷新页面后不会再次显示此凭证。为其他设备签发时，请安全传递后再刷新。")
-                                .font(.caption).foregroundStyle(.secondary)
+                            IssuedDeviceCard(issued: issued, administration: administration)
+                                .transition(.opacity.combined(with: .scale(scale: 0.97)))
                         }
                         if administration.devices.isEmpty {
                             Text("尚未授权设备；签发凭证不会自动分享任何活动。")
                                 .foregroundStyle(.secondary)
                         }
                         ForEach(administration.devices) { device in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(device.displayName)
-                                    Text(device.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                                }
-                                Spacer()
-                                Button("撤销…", role: .destructive) { revoking = device }
-                            }
+                            DeviceRow(device: device, revoke: { revoking = device })
+                                .transition(.opacity.combined(with: .scale(scale: 0.97)))
                         }
+                        .animation(.snappy(duration: 0.3), value: administration.devices.map(\.id))
                     }
                     .disabled(administration.busy)
+                    .animation(.snappy(duration: 0.3), value: administration.issued != nil)
                 }
             } else {
                 Section {
@@ -135,6 +140,61 @@ struct ReceiverView: View {
         Binding(get: { administration.settings.allowedOrigins.joined(separator: "\n") }, set: { value in
             administration.settings.allowedOrigins = value.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
         })
+    }
+}
+
+@MainActor
+private struct IssuedDeviceCard: View {
+    let issued: CreatedDevice
+    @ObservedObject var administration: ReceiverAdministration
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("新授权设备", value: issued.device.displayName)
+            SecureField("一次性返回的设备凭证", text: .constant(issued.token))
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                Button {
+                    administration.copyIssuedCredential()
+                } label: {
+                    Label("复制设备凭证", systemImage: "doc.on.doc")
+                }
+                .glassAction()
+                Button {
+                    administration.addIssuedToThisMac()
+                } label: {
+                    Label("添加到本机接收端，暂不启用", systemImage: "plus.viewfinder")
+                }
+                .prominentAction()
+            }
+            Label("刷新页面后不会再次显示此凭证。为其他设备签发时，请安全传递后再刷新。", systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surfaceCard(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+@MainActor
+private struct DeviceRow: View {
+    let device: ReceiverDevice
+    let revoke: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "laptopcomputer.and.iphone")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.displayName)
+                Text(device.id)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            Spacer()
+            Button("撤销…", role: .destructive, action: revoke)
+        }
     }
 }
 
@@ -188,7 +248,7 @@ private struct ReceiverConnectSheet: View {
                     notice = nil
                     Task { await connect() }
                 }
-                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                .prominentAction().keyboardShortcut(.defaultAction)
                 .disabled(busy || name.isEmpty || baseURL.isEmpty || token.isEmpty)
             }
         }
