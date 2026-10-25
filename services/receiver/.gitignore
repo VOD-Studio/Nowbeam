@@ -1,0 +1,11 @@
+/data/
+/bin/
+/nowbeam-receiver
+/coverage*
+.env*
+*.sqlite
+*.sqlite-*
+*.sqlite.lock
+*.pem
+*.key
+*.crt
