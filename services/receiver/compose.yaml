@@ -1,0 +1,29 @@
+services:
+  receiver:
+    build:
+      context: ../..
+      dockerfile: services/receiver/Dockerfile
+    restart: unless-stopped
+    environment:
+      NOWBEAM_LISTEN_ADDR: 0.0.0.0:8787
+      NOWBEAM_DATABASE_PATH: /var/lib/nowbeam/nowbeam.sqlite
+      NOWBEAM_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap_token
+    secrets:
+      - bootstrap_token
+    volumes:
+      - receiver-data:/var/lib/nowbeam
+    ports:
+      - "127.0.0.1:${NOWBEAM_HOST_PORT:-8787}:8787"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 12s
+
+secrets:
+  bootstrap_token:
+    file: ${NOWBEAM_BOOTSTRAP_SECRET_FILE:?Set an absolute path to the bootstrap secret file}
+
+volumes:
+  receiver-data:

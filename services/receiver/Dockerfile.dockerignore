@@ -1,0 +1,14 @@
+**
+!services/
+!services/receiver/
+!services/receiver/**
+services/receiver/data/
+services/receiver/bin/
+services/receiver/nowbeam-receiver
+services/receiver/.env*
+services/receiver/**/*.sqlite*
+services/receiver/**/*.db*
+services/receiver/**/*.pem
+services/receiver/**/*.key
+services/receiver/**/*.crt
+services/receiver/coverage*
