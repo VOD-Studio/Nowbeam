@@ -13,7 +13,7 @@ public final class SessionGuard {
             case .locked: "已锁屏，全部活动清空"
             case .inactive: "当前用户会话未激活，全部活动清空"
             case .sleeping: "系统或屏幕休眠，全部活动清空"
-            case .unavailable: "无法确认系统锁定状态，分享保持空白"
+            case .unavailable: "无法读取系统会话信息，分享保持空白"
             }
         }
     }
@@ -83,16 +83,25 @@ public final class SessionGuard {
             next = .inactive
         } else if let session = CGSessionCopyCurrentDictionary() as? [String: Any],
                   let onConsole = session[kCGSessionOnConsoleKey as String] as? Bool,
-                  let loggedIn = session[kCGSessionLoginDoneKey as String] as? Bool,
-                  let locked = session["CGSSessionScreenIsLocked"] as? Bool {
-            // CGSessionCopyCurrentDictionary 是公开 API；此字段未文档化，缺失绝不能默认解锁。
-            next = !onConsole || !loggedIn ? .inactive : (locked ? .locked : .active)
+                  let loggedIn = session[kCGSessionLoginDoneKey as String] as? Bool {
+            // CGSessionCopyCurrentDictionary 是公开 API；实测 macOS 27 上 CGSSessionScreenIsLocked
+            // 仅在锁屏期间出现（伴随 CGSSessionScreenLockedTime），解锁后整个键消失。
+            // 因此：标志存在即锁屏；键缺失表示未锁。字典整体不可得或公开键异常时仍 fail-closed。
+            next = Self.evaluate(onConsole: onConsole, loggedIn: loggedIn,
+                                 lockedFlag: session["CGSSessionScreenIsLocked"] as? Bool)
         } else {
             next = .unavailable
         }
         guard next != state else { return }
         state = next
         onChange?(next)
+    }
+
+    /// 依据实测键语义判定：锁屏标志仅锁屏期间出现，缺失即未锁；公开键异常时 fail-closed。
+    nonisolated static func evaluate(onConsole: Bool, loggedIn: Bool, lockedFlag: Bool?) -> State {
+        if !onConsole || !loggedIn { return .inactive }
+        if lockedFlag == true { return .locked }
+        return .active
     }
 
     public func stop() {
