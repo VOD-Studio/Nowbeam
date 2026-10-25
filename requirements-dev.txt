@@ -1,0 +1,4 @@
+# 仅用于开发期契约校验与 macOS 打包，不是 Nowbeam 产品运行依赖。
+jsonschema==4.25.1
+rfc3339-validator==0.1.4
+cmake==3.31.6; sys_platform == "darwin"

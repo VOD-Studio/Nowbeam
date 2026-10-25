@@ -1,0 +1,36 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+
+# 本地凭证、签名身份和部署数据
+.env
+.env.*
+!.env.example
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.key
+*.pem
+*.sqlite
+*.sqlite3
+*.db
+*-wal
+*-shm
+*.log
+secrets/
+
+# Swift / Xcode 的可再生或个人文件
+.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# 构建产物与覆盖率
+/build/
+/dist/
+/coverage/
+*.xcarchive
+*.dmg
+*.app/
