@@ -1,0 +1,116 @@
+{
+  "welcome": {
+    "protocolVersion": 1,
+    "type": "welcome",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "deviceId": "10000000-0000-4000-8000-000000000001",
+    "serverTime": "2026-01-01T00:00:00Z",
+    "heartbeatIntervalMs": 15000,
+    "leaseDurationMs": 45000,
+    "maxMessageBytes": 65536
+  },
+  "emptySnapshot": {
+    "protocolVersion": 1,
+    "type": "snapshot",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "observedAt": "2026-01-01T00:00:00Z",
+    "sources": { "application": null, "window": null, "media": null }
+  },
+  "applicationSnapshot": {
+    "protocolVersion": 1,
+    "type": "snapshot",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "observedAt": "2026-01-01T00:00:00Z",
+    "sources": {
+      "application": { "displayName": "示例编辑器" },
+      "window": { "title": "明确允许公开的示例标题" },
+      "media": null
+    }
+  },
+  "windowOnlySnapshot": {
+    "protocolVersion": 1,
+    "type": "snapshot",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "observedAt": "2026-01-01T00:00:00Z",
+    "sources": {
+      "application": null,
+      "window": { "title": "仅窗口来源的虚构示例" },
+      "media": null
+    }
+  },
+  "mediaSnapshot": {
+    "protocolVersion": 1,
+    "type": "snapshot",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "observedAt": "2026-01-01T00:00:00Z",
+    "sources": {
+      "application": null,
+      "window": null,
+      "media": {
+        "sessionId": "30000000-0000-4000-8000-000000000003",
+        "playerName": "QQ 音乐",
+        "title": "契约示例曲目（非真实播放）",
+        "artist": "虚构艺人",
+        "album": null,
+        "playback": { "state": "playing", "durationMs": 180000, "positionMs": 42000, "rate": 1 }
+      }
+    }
+  },
+  "pausedMediaSnapshot": {
+    "protocolVersion": 1,
+    "type": "snapshot",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "observedAt": "2026-01-01T00:00:00Z",
+    "sources": {
+      "application": null,
+      "window": null,
+      "media": {
+        "sessionId": "30000000-0000-4000-8000-000000000004",
+        "playerName": "网易云音乐",
+        "title": "暂停状态示例（非真实播放）",
+        "artist": null,
+        "album": null,
+        "playback": { "state": "paused", "durationMs": 180000, "positionMs": 23000, "rate": 0 }
+      }
+    }
+  },
+  "unknownProgressSnapshot": {
+    "protocolVersion": 1,
+    "type": "snapshot",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "observedAt": "2026-01-01T00:00:00Z",
+    "sources": {
+      "application": null,
+      "window": null,
+      "media": {
+        "sessionId": "30000000-0000-4000-8000-000000000005",
+        "playerName": "QQ 音乐",
+        "title": "未知进度的虚构示例",
+        "artist": null,
+        "album": null,
+        "playback": { "state": "playing", "durationMs": null, "positionMs": null, "rate": null }
+      }
+    }
+  },
+  "ack": {
+    "protocolVersion": 1,
+    "type": "ack",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": 1,
+    "receivedAt": "2026-01-01T00:00:00Z",
+    "expiresAt": "2026-01-01T00:00:45Z"
+  },
+  "error": {
+    "protocolVersion": 1,
+    "type": "error",
+    "connectionId": "20000000-0000-4000-8000-000000000002",
+    "sequence": null,
+    "code": "invalid_message"
+  }
+}
