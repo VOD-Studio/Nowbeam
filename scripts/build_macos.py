@@ -105,7 +105,7 @@ def main() -> None:
         "CFBundleIdentifier": args.bundle_id, "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "1",
         "LSMinimumSystemVersion": "15.0", "LSUIElement": True,
-        "NSPrincipalClass": "NSApplication", "NSHighResolutionCapable": True,
+        "NSSupportsAutomaticTermination": False, "NSSupportsSuddenTermination": False,
     }
     if args.configuration == "debug":
         information["NSAppTransportSecurity"] = {"NSAllowsLocalNetworking": True}

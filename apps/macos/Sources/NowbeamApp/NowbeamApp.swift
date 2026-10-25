@@ -7,6 +7,9 @@ import SwiftUI
 private enum NowbeamLauncher {
     @MainActor
     static func main() {
+        // 菜单栏常驻上报：禁止系统在无窗口或空闲时自动终止，否则会绕过退出清理、静默断开。
+        ProcessInfo.processInfo.disableAutomaticTermination("menu-bar-presence")
+        ProcessInfo.processInfo.disableSuddenTermination()
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
         let delegate = ApplicationDelegate()
