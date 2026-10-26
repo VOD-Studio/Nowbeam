@@ -42,11 +42,12 @@ jobs:
       - run: make build-receiver
 
   macos:
-    # 官方标准 macos-15 为 Apple Silicon；测试运行在最低支持系统上。
-    # 工具链选用镜像内最新 Xcode：Swift 6.1.2 的 IRGen 存在 SmallVector 容量
-    # 回绕崩溃（SettingsView 的 async thunk），且 Liquid Glass API 需要新 SDK；
-    # 部署目标仍是 macOS 15，运行时降级路径在本 job 真实覆盖。
-    runs-on: macos-15
+    # macos-26（Apple Silicon）镜像含 Xcode 26.x。macos-15 镜像的最新
+    # Xcode 16.4（Swift 6.1/6.2）在 IRGen 生成 async reabstraction thunk 时
+    # SmallVector 容量回绕崩溃（signal 6），无法编译本包；Liquid Glass API
+    # 也需要 macOS 26 SDK。部署目标仍为 macOS 15；macOS 15 真机运行属于
+    # 独立验收项，不由 CI 代替。
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
