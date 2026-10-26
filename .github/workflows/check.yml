@@ -42,11 +42,12 @@ jobs:
       - run: make build-receiver
 
   macos:
-    # 官方标准 macos-15 为 Apple Silicon；最低系统上的测试不能用新系统交叉编译替代。
+    # 官方标准 macos-15 为 Apple Silicon；测试运行在最低支持系统上。
+    # 工具链选用镜像内最新 Xcode：Swift 6.1.2 的 IRGen 存在 SmallVector 容量
+    # 回绕崩溃（SettingsView 的 async thunk），且 Liquid Glass API 需要新 SDK；
+    # 部署目标仍是 macOS 15，运行时降级路径在本 job 真实覆盖。
     runs-on: macos-15
     timeout-minutes: 30
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -56,11 +57,14 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-dev.txt
-      - name: 确认 Apple Silicon 与工具链
+      - name: 选择最新 Xcode 工具链
         run: |
           test "$(uname -m)" = arm64
-          xcodebuild -version
-          swift --version
+          LATEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "使用工具链: $LATEST"
+          echo "DEVELOPER_DIR=$LATEST/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$LATEST/Contents/Developer" xcodebuild -version
+          DEVELOPER_DIR="$LATEST/Contents/Developer" swift --version
       - run: make setup
       - run: make test-macos
       - run: make test-macos SWIFT_CONFIGURATION=release
