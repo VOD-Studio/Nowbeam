@@ -92,13 +92,15 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
 
     @objc func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 690),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 480),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Nowbeam"
+            // 侧栏材质延伸到标题栏之后，红绿灯悬浮其上，等同系统偏好设置的 unified 形态。
+            window.titlebarAppearsTransparent = true
+            window.styleMask.insert(.fullSizeContentView)
             window.contentView = NSHostingView(rootView: SettingsView(model: model))
-            window.minSize = NSSize(width: 780, height: 610)
+            window.minSize = NSSize(width: 780, height: 460)
             window.isReleasedWhenClosed = false
-            window.setFrameAutosaveName("Nowbeam.Settings")
             window.center()
             settingsWindow = window
         }
