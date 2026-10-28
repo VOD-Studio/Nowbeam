@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -71,6 +72,29 @@ def build_media() -> Path:
     return resources
 
 
+ICON_MASTER = ROOT / "apps/macos/Branding/AppIcon.png"
+# iconutil 要求的 iconset 文件名与像素尺寸。
+ICONSET_SIZES = {
+    "icon_16x16.png": 16, "icon_16x16@2x.png": 32,
+    "icon_32x32.png": 32, "icon_32x32@2x.png": 64,
+    "icon_128x128.png": 128, "icon_128x128@2x.png": 256,
+    "icon_256x256.png": 256, "icon_256x256@2x.png": 512,
+    "icon_512x512.png": 512, "icon_512x512@2x.png": 1024,
+}
+
+
+def build_icns(destination: Path) -> None:
+    """由 1024 母版生成 .icns，只用系统自带的 sips 与 iconutil。"""
+    if not ICON_MASTER.is_file():
+        raise RuntimeError(f"缺少图标母版：{ICON_MASTER.relative_to(ROOT)}")
+    with tempfile.TemporaryDirectory(prefix="icon-", dir=BUILD) as temporary:
+        iconset = Path(temporary) / "AppIcon.iconset"
+        iconset.mkdir()
+        for name, pixels in ICONSET_SIZES.items():
+            run("sips", "-z", str(pixels), str(pixels), ICON_MASTER, "--out", iconset / name)
+        run("iconutil", "-c", "icns", iconset, "-o", destination)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="构建 Nowbeam .app / 开发 DMG，不执行发布或公证")
     parser.add_argument("--configuration", choices=("debug", "release"), default="release")
@@ -78,7 +102,14 @@ def main() -> None:
     parser.add_argument("--skip-dmg", action="store_true")
     parser.add_argument("--bundle-id", default="local.nowbeam.development")
     parser.add_argument("--sign-identity", default="-")
+    parser.add_argument("--version", default="0.1.0", help="CFBundleShortVersionString，形如 1.2.3")
+    parser.add_argument("--build", default="1", help="CFBundleVersion，纯数字构建号")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist", help="输出目录，默认仓库内 dist/")
     args = parser.parse_args()
+    if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
+        parser.error("--version 必须是 主.次.修订 三段数字，例如 0.1.0。")
+    if not re.fullmatch(r"\d+", args.build):
+        parser.error("--build 必须是纯数字。")
     if sys.platform != "darwin" or os.uname().machine != "arm64":
         parser.error("原生打包需要 Apple Silicon macOS。")
     if args.sign_identity != "-" and args.bundle_id.startswith("local."):
@@ -90,8 +121,8 @@ def main() -> None:
     package = ROOT / "apps/macos"
     run("swift", "build", "--package-path", package, "--configuration", args.configuration, "--arch", "arm64")
     binary_directory = Path(run("swift", "build", "--package-path", package, "--configuration", args.configuration, "--arch", "arm64", "--show-bin-path", capture=True))
-    destination = ROOT / "dist"
-    destination.mkdir(exist_ok=True)
+    destination = args.output.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
     application = destination / "Nowbeam.app"
     if application.exists():
         shutil.rmtree(application)
@@ -100,10 +131,12 @@ def main() -> None:
     (contents / "Resources").mkdir()
     shutil.copy2(binary_directory / "Nowbeam", contents / "MacOS/Nowbeam")
     shutil.copytree(resources, contents / "Resources/MediaRemote", symlinks=True)
+    build_icns(contents / "Resources/AppIcon.icns")
     information = {
         "CFBundleExecutable": "Nowbeam", "CFBundleName": "Nowbeam", "CFBundleDisplayName": "Nowbeam",
         "CFBundleIdentifier": args.bundle_id, "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "1",
+        "CFBundleShortVersionString": args.version, "CFBundleVersion": args.build,
+        "CFBundleIconFile": "AppIcon",
         "LSMinimumSystemVersion": "15.0", "LSUIElement": True,
         "NSSupportsAutomaticTermination": False, "NSSupportsSuddenTermination": False,
     }

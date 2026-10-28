@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/macos/Branding/AppIcon.png" alt="Nowbeam 应用图标" width="128" height="128">
+</p>
+
 # Nowbeam
 
 隐私优先的原生 macOS 状态上报软件：只把你明确允许分享的当前活动，通过通用的 WebSocket 协议直接发送给一个或多个接收端，不绑定任何网站或博客系统。
@@ -13,6 +17,7 @@
 - [使用指南](#使用指南)
 - [项目结构](#项目结构)
 - [开发与测试](#开发与测试)
+- [发布](#发布)
 - [隐私与安全](#隐私与安全)
 - [第三方组件](#第三方组件)
 - [文档索引](#文档索引)
@@ -147,6 +152,26 @@ make test                                     # 聚合两端行为测试
 真实验收必须覆盖：前台切换、同应用窗口变化、两款播放器、权限撤销、锁屏/解锁、过期、重连和两个独立接收端。没有对应环境的项目要明确标注“未验证”，不得用另一个播放器或模拟数据代替。
 
 参与开发前请先阅读 [AGENTS.md](AGENTS.md)（协作约定与不可重新解释的产品边界）、[CONTEXT.md](CONTEXT.md)（领域术语）和各子目录的 `AGENTS.md`。
+
+## 发布
+
+发布由 [release.yml](.github/workflows/release.yml) 完成，**只能由维护者**在 `main` 的提交上推送版本标签触发：
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+流水线会先复核检查与测试，再构建并发布以下内容，GitHub Release 一律标记为**预发布**：
+
+| 产物 | 说明 |
+| --- | --- |
+| `Nowbeam-<版本>-macos-arm64-adhoc.dmg` | 客户端，ad-hoc 签名、未公证 |
+| `nowbeam-receiver-<版本>-linux-{amd64,arm64}.tar.gz` | 接收服务二进制，附第三方许可文本 |
+| `ghcr.io/<所有者>/nowbeam-receiver:<版本>` | 接收服务多平台镜像（首次推送默认私有，需维护者在包设置中公开） |
+| `SHA256SUMS` | 以上文件的校验和 |
+
+在 GitHub 的 Actions 页面手动运行 “Release” 只会构建并保留产物，不发布，可用来演练。版本号以标签为准，客户端的 `CFBundleShortVersionString` 与之一致。Developer ID 签名与公证需要维护者提供身份和凭据，尚未接入。
 
 ## 隐私与安全
 
