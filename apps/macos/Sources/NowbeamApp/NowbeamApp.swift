@@ -1,135 +1,120 @@
 import AppKit
-import Combine
-import NowbeamCore
 import SwiftUI
 
+/// 模型与导航状态由进程级单例持有：设置窗口、菜单栏面板和退出清理共用同一份。
+@MainActor
+enum AppEnvironment {
+    static let model = AppModel()
+    static let navigator = SettingsNavigator()
+}
+
+private let settingsWindowID = "settings"
+
+// 设置窗口与菜单栏面板都交给 SwiftUI 场景管理：系统才会为其套用 macOS 26 的玻璃窗口外壳、
+// 悬浮侧栏和菜单栏面板，同时自动提供标准的编辑菜单（⌘V 粘贴凭证依赖它）。
 @main
-private enum NowbeamLauncher {
-    @MainActor
-    static func main() {
+struct NowbeamApp: App {
+    @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var delegate
+
+    init() {
         // 菜单栏常驻上报：禁止系统在无窗口或空闲时自动终止，否则会绕过退出清理、静默断开。
         ProcessInfo.processInfo.disableAutomaticTermination("menu-bar-presence")
         ProcessInfo.processInfo.disableSuddenTermination()
-        let application = NSApplication.shared
-        application.setActivationPolicy(.accessory)
-        let delegate = ApplicationDelegate()
-        application.delegate = delegate
-        withExtendedLifetime(delegate) { application.run() }
+    }
+
+    var body: some Scene {
+        Window("Nowbeam", id: settingsWindowID) {
+            SettingsView(model: AppEnvironment.model, navigator: AppEnvironment.navigator)
+                .frame(minWidth: 800, minHeight: 540)
+        }
+        .defaultSize(width: 940, height: 640)
+        .defaultLaunchBehavior(.presented)
+        .commands { SettingsCommands() }
+
+        MenuBarExtra {
+            StatusPanel()
+        } label: {
+            StatusIcon(model: AppEnvironment.model)
+        }
+        .menuBarExtraStyle(.window)
+
+        #if DEBUG
+        // 仅开发构建：MenuBarExtra 面板无法在不点击的情况下展示，这里提供同内容的普通窗口用于截图验收。
+        Window("面板预览（仅开发构建）", id: "panel-preview") {
+            StatusPanel().glassPanel(radius: 24).padding(8)
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(ProcessInfo.processInfo.environment["NOWBEAM_DEBUG_PANEL"] == "1" ? .presented : .suppressed)
+        #endif
+    }
+}
+
+/// ⌘, 打开设置窗口。
+private struct SettingsCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("设置…") { SettingsOpener.open(using: openWindow) }
+                .keyboardShortcut(",")
+        }
     }
 }
 
 @MainActor
-final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private let model = AppModel()
-    private var statusItem: NSStatusItem?
-    private let menu = NSMenu()
-    private var settingsWindow: NSWindow?
-    private var observation: AnyCancellable?
+private enum SettingsOpener {
+    static func open(section: SettingsSection? = nil, using openWindow: OpenWindowAction) {
+        if let section { AppEnvironment.navigator.selection = section }
+        openWindow(id: settingsWindowID)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+}
+
+/// 菜单栏图标：暂停与分享中用不同符号，不靠颜色区分。
+private struct StatusIcon: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let sharing = model.sharingState == .sharing
+        Image(systemName: sharing ? "dot.radiowaves.left.and.right" : "pause.circle")
+            .accessibilityLabel(sharing ? "Nowbeam：正在分享允许的来源" : "Nowbeam：当前不分享活动")
+    }
+}
+
+private struct StatusPanel: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        StatusPopover(
+            model: AppEnvironment.model,
+            openSettings: { SettingsOpener.open(section: $0, using: openWindow) },
+            quit: { NSApplication.shared.terminate(nil) }
+        )
+    }
+}
+
+@MainActor
+final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private var exiting = false
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem = item
-        menu.delegate = self
-        menu.autoenablesItems = false
-        item.menu = menu
-        observation = model.objectWillChange.sink { [weak self] _ in
-            Task { @MainActor in self?.refreshMenu() }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["NOWBEAM_DEBUG_APPEARANCE"] == "dark" {
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         }
-        refreshMenu()
-        showSettings()
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) { refreshMenu() }
-
-    private func refreshMenu() {
-        let sharing = model.configuration.sharingEnabled && model.sessionState.permitsCapture
-        let image = NSImage(systemSymbolName: sharing ? "dot.radiowaves.left.and.right" : "pause.circle", accessibilityDescription: "Nowbeam")
-        image?.isTemplate = true
-        statusItem?.button?.image = image
-        statusItem?.button?.toolTip = sharing ? "Nowbeam：正在分享允许的来源" : "Nowbeam：当前不分享活动"
-        menu.removeAllItems()
-        addLabel(model.configuration.sharingEnabled ? model.sessionState.description : "分享已暂停；已启用目标只接收空快照")
-        addAction(model.configuration.sharingEnabled ? "暂停分享" : "恢复分享…", selector: #selector(toggleSharing))
-        menu.addItem(.separator())
-        let sources = sharing ? model.currentPreview() : Sources.empty
-        addLabel("应用：" + (sources.application?.displayName ?? "不分享"))
-        addLabel("窗口：" + (sources.window?.title ?? "不分享"))
-        addLabel("媒体：" + (sources.media.map { $0.playerName + " · " + $0.title } ?? "不分享"))
-        menu.addItem(.separator())
-        if model.configuration.destinations.isEmpty {
-            addLabel("尚未配置接收端")
-        } else {
-            for destination in model.configuration.destinations {
-                let phase = model.statuses[destination.id]?.phase
-                let state: String
-                switch phase {
-                case .confirmed: state = "已确认"
-                case .connecting, .ready: state = "连接中，尚未确认"
-                case .retrying: state = "等待重连"
-                case .blocked: state = "需要处理授权或连接问题"
-                default: state = "未连接"
-                }
-                addLabel(destination.name + " — " + state)
-            }
-        }
-        menu.addItem(.separator())
-        addAction("设置…", selector: #selector(showSettings), key: ",")
-        addAction("退出 Nowbeam", selector: #selector(quit), key: "q")
-    }
-
-    private func addLabel(_ text: String) {
-        let item = NSMenuItem(title: String(text.prefix(100)), action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        menu.addItem(item)
-    }
-
-    private func addAction(_ title: String, selector: Selector, key: String = "") {
-        let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
-        item.target = self
-        menu.addItem(item)
-    }
-
-    @objc func showSettings() {
-        if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 480),
-                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "Nowbeam"
-            // 侧栏材质延伸到标题栏之后，红绿灯悬浮其上，等同系统偏好设置的 unified 形态。
-            window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
-            window.contentView = NSHostingView(rootView: SettingsView(model: model))
-            window.minSize = NSSize(width: 780, height: 460)
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
-        }
+        #endif
         NSApplication.shared.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
     }
-
-    @objc private func toggleSharing() {
-        if model.configuration.sharingEnabled { model.setSharing(false); return }
-        guard model.enabledDestinationCount > 0 else { showSettings(); return }
-        let alert = NSAlert()
-        alert.messageText = "恢复分享？"
-        alert.informativeText = "将把本地隐私规则允许的来源发送给 \(model.enabledDestinationCount) 个已启用目的地。接收方可能保存副本。可在设置中检查当前预览。"
-        alert.addButton(withTitle: "恢复分享")
-        alert.addButton(withTitle: "取消")
-        showSettings()
-        guard let settingsWindow else { return }
-        alert.beginSheetModal(for: settingsWindow) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.model.setSharing(true) }
-        }
-    }
-
-    @objc private func quit() { NSApplication.shared.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !exiting else { return .terminateLater }
         exiting = true
         Task {
-            await model.shutdown()
+            await AppEnvironment.model.shutdown()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

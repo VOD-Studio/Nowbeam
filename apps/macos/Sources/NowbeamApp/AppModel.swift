@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var preview = Sources.empty
     @Published private(set) var sessionState = SessionGuard.State.unavailable
     @Published private(set) var windowDiagnostic = "窗口来源已关闭"
+    @Published private(set) var accessibilityGranted = false
     @Published private(set) var mediaDiagnostic = "媒体来源已关闭"
     @Published private(set) var statuses: [UUID: ConnectionStatus] = [:]
     @Published var errorMessage: String?
@@ -91,6 +92,7 @@ final class AppModel: ObservableObject {
             || (preview.window != nil && next.window == nil) || (preview.media != nil && next.media == nil)
         preview = next
         windowDiagnostic = desktop.windowDiagnostic
+        accessibilityGranted = desktop.accessibilityGranted
         mediaDiagnostic = configuration.sources.mediaEnabled && (!session.state.permitsCapture || terminating)
             ? "系统暂停采集" : media.diagnostic
         if changed && configuration.sharingEnabled { notifyConnections(forceReconnect: tightened) }
