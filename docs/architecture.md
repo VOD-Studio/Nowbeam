@@ -105,6 +105,7 @@ flowchart LR
 - `apps/macos/`：SwiftPM 工程；`Nowbeam` 是原生入口，`NowbeamCore` 管理模型、隐私投影、凭证与连接，`NowbeamCapture` 管理桌面、会话保护和媒体采集；`MediaSupport/` 保存自有媒体 gate 与宿主。
 - `services/receiver/`：独立 Go module，`cmd/nowbeam-receiver/` 放入口，`internal/` 按协议、设备状态、HTTP 管理和存储职责拆分；具体构建、部署和 API 见[服务 README](../services/receiver/README.md)。
 - `scripts/build_macos.py`：校验并构建固定媒体依赖、生成独立 `.app`，可生成 DMG；开发输出在 `dist/`，默认 ad-hoc，未公证。`make app-debug` 构建 Debug `.app`，`make app` 构建 Release `.app` 和 DMG，完整前提见[根 README](../README.md#构建与启动原生软件)。
+- `.github/workflows/release.yml`：`vX.Y.Z` 标签（须在 `main` 上）触发预发布，产出 ad-hoc 签名的客户端 DMG、接收服务二进制与 GHCR 镜像；Developer ID 签名与公证仍未接入，见[产品规格](product.md)第 7 节第 12 项。
 - `make check` 是静态契约与仓库检查，`make test-receiver` 和 `make test-macos` 是两端行为测试；`make build-receiver` 生成可运行服务。原生软件日常配置仍在图形界面，不用开发命令替代用户操作。
 - 不建立共享语言运行库；以 `protocol/` 为契约来源，各语言模型各自实现。真实接收链路与 Swift 状态机测试不能替代系统采集、两款播放器和正式 TLS/签名包的联合验收。
 
