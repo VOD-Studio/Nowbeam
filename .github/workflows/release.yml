@@ -1,0 +1,226 @@
+name: Release
+
+# 推送 vX.Y.Z 标签发布预发布版（客户端 ad-hoc 签名、未公证）；手动运行只构建并保留产物，不发布。
+# 版本号以标签为准，并且标签必须指向 main 上的提交。
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "标签 $REF_NAME 指向的提交不在 main 上，拒绝发布。" >&2
+              exit 1
+            fi
+            echo "version=${REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/receiver/go.mod
+          cache-dependency-path: services/receiver/go.sum
+      - run: make setup
+      - run: make check
+      - run: make test-receiver
+
+  macos:
+    needs: [prepare, verify]
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: 选择最新 Xcode 工具链
+        run: |
+          test "$(uname -m)" = arm64
+          LATEST=$(printf '%s\n' /Applications/Xcode*.app | sort -V | tail -1)
+          echo "使用工具链: $LATEST"
+          echo "DEVELOPER_DIR=$LATEST/Contents/Developer" >> "$GITHUB_ENV"
+      - run: make setup
+      - run: make test-macos
+      - run: make test-macos SWIFT_CONFIGURATION=release
+      - name: 构建 Release 应用与 DMG（ad-hoc 签名，未公证）
+        run: make app APP_ARGS="--version $VERSION --build $GITHUB_RUN_NUMBER"
+      - name: 核对产物
+        run: |
+          test "$(lipo -archs dist/Nowbeam.app/Contents/MacOS/Nowbeam)" = arm64
+          codesign --verify --deep --strict dist/Nowbeam.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/Nowbeam.app/Contents/Info.plist)" = "$VERSION"
+          test -f dist/Nowbeam.app/Contents/Resources/AppIcon.icns
+          mkdir -p out
+          cp dist/Nowbeam.dmg "out/Nowbeam-$VERSION-macos-arm64-adhoc.dmg"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-dmg
+          path: out/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  receiver-binaries:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/receiver/go.mod
+          cache-dependency-path: services/receiver/go.sum
+      - name: 构建并收集第三方许可
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        working-directory: services/receiver
+        run: |
+          go mod download
+          mkdir -p "$GITHUB_WORKSPACE/package"
+          go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/package/nowbeam-receiver" ./cmd/nowbeam-receiver
+          sh scripts/collect-licenses.sh "$GITHUB_WORKSPACE/package/licenses"
+      - name: 打包
+        run: |
+          mkdir -p out
+          tar -C package -czf "out/nowbeam-receiver-$VERSION-linux-${{ matrix.arch }}.tar.gz" nowbeam-receiver licenses
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: receiver-linux-${{ matrix.arch }}
+          path: out/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  image:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: 构建 linux/amd64 + linux/arm64 镜像（标签发布时推送到 GHCR）
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nowbeam-receiver"
+          docker buildx create --name release --driver docker-container --use
+          args=(
+            --platform "linux/amd64,linux/arm64"
+            --file services/receiver/Dockerfile
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+            --label "org.opencontainers.image.revision=$GITHUB_SHA"
+            --label "org.opencontainers.image.version=$VERSION"
+          )
+          if [ "$PUBLISH" = true ]; then
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+            args+=(--tag "$repository:$VERSION" --push)
+          fi
+          docker buildx build "${args[@]}" .
+
+  release:
+    if: needs.prepare.outputs.publish == 'true'
+    needs: [prepare, verify, macos, receiver-binaries, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: 生成校验和与发布说明
+        run: |
+          (cd artifacts && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nowbeam-receiver:$VERSION"
+          cat > notes.md <<EOF
+          这是 Nowbeam $VERSION 的**预发布版**，尚未完成正式签名与公证，也还有多项真实环境验收未完成，详见[项目状态](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/README.md#项目状态)。
+
+          ## 下载
+
+          | 文件 | 说明 |
+          | --- | --- |
+          | \`Nowbeam-$VERSION-macos-arm64-adhoc.dmg\` | macOS 客户端（Apple Silicon，macOS 15+）。**ad-hoc 签名、未公证** |
+          | \`nowbeam-receiver-$VERSION-linux-amd64.tar.gz\` / \`-arm64.tar.gz\` | 可选的独立接收服务二进制，含第三方许可文本 |
+          | \`$image\` | 接收服务容器镜像（linux/amd64、linux/arm64） |
+          | \`SHA256SUMS\` | 以上文件的 SHA-256 校验和 |
+
+          校验：\`shasum -a 256 -c SHA256SUMS\`
+
+          ## 已知限制
+
+          - 客户端未经 Developer ID 签名和公证，首次打开会被 Gatekeeper 拦截。可在「系统设置 → 隐私与安全性」中对该应用选择「仍要打开」；不要关闭 Gatekeeper 或系统完整性保护。
+          - 接收服务部署、TLS 与初始化见[接收服务指南](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/services/receiver/README.md)。
+          EOF
+      - name: 创建 GitHub Release（预发布）
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --verify-tag --prerelease \
+            --title "Nowbeam $VERSION" \
+            --notes-file notes.md

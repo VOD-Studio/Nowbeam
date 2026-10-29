@@ -19,96 +19,30 @@ struct ReceiverView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                Text("仅用于可选的 Nowbeam 独立接收服务。第三方目的地的账号、凭证和公开策略由对方管理，不需要连接这里。")
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Picker("接收服务", selection: $selectedID) {
-                        Text("选择一个服务").tag(UUID?.none)
-                        ForEach(model.configuration.managedReceivers) { receiver in
-                            Text(receiver.name).tag(Optional(receiver.id))
-                        }
-                    }
-                    Button("连接服务…") { connecting = true }
-                }
-            }
+        PageScaffold("接收服务管理",
+                     subtitle: "仅用于可选的 Nowbeam 独立接收服务。第三方接收端的账号、凭证和公开策略由对方管理，不需要连接这里。") {
             if let receiver = administration.receiver {
-                Section("管理连接") {
-                    KeyValueRow(label: "服务地址", value: receiver.baseURL, monospaced: true)
-                    if administration.busy { ProgressView("正在与接收服务通信…") }
-                    if let notice = administration.notice {
-                        Label(notice, systemImage: "bubble.left.and.text.bubble.right")
-                            .font(.callout).textSelection(.enabled)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                    HStack(spacing: 8) {
-                        Button { Task { await administration.select(receiver.id) } } label: {
-                            Label("刷新", systemImage: "arrow.clockwise")
-                        }
-                        .glassAction()
-                        Button {
-                            administration.copyOwnerCredential()
-                        } label: {
-                            Label("复制管理凭证", systemImage: "doc.on.doc")
-                        }
-                        .glassAction()
-                        Spacer(minLength: 8)
-                        Button("移除本机管理连接…", role: .destructive) { confirmRemoval = true }
-                    }
-                    .disabled(administration.busy)
-                }
-                .animation(.snappy(duration: 0.25), value: administration.notice)
+                ServiceCard(model: model, administration: administration, receiver: receiver,
+                            selectedID: $selectedID, confirmRemoval: $confirmRemoval)
                 if administration.loaded {
-                    Section("公开读取") {
-                        Toggle("允许匿名读取当前状态", isOn: $administration.settings.publicReadEnabled)
-                        Text("关闭时仅所有者可读取。开启后，任何能访问 API 的人均可能读取所有获准设备的当前状态。")
-                            .foregroundStyle(.secondary)
-                        TextField("允许的浏览器 Origin，每行一个", text: origins, axis: .vertical)
-                            .lineLimit(2...5).autocorrectionDisabled()
-                        Text("CORS 只是浏览器跨域规则，不是身份验证。留空不会禁止无 Origin 的客户端读取。")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Button("保存公开设置") {
-                            if administration.settings.publicReadEnabled && !administration.savedSettings.publicReadEnabled {
-                                confirmPublic = true
-                            } else { Task { await administration.saveSettings() } }
-                        }
-                        .prominentAction()
-                    }
-                    .disabled(administration.busy)
-                    Section("授权设备") {
-                        HStack(spacing: 8) {
-                            TextField("公开设备名称", text: $deviceName)
-                            Button("签发设备凭证") { Task { await administration.createDevice(name: deviceName) } }
-                                .prominentAction()
-                                .disabled(deviceName.isEmpty || administration.issued != nil)
-                        }
-                        Text("设备名由你填写，不自动使用主机名或硬件标识。设备凭证只用于上报，不能管理实例。")
-                            .font(.callout).foregroundStyle(.secondary)
-                        if let issued = administration.issued {
-                            IssuedDeviceCard(issued: issued, administration: administration)
-                                .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                        }
-                        if administration.devices.isEmpty {
-                            Text("尚未授权设备；签发凭证不会自动分享任何活动。")
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(administration.devices) { device in
-                            DeviceRow(device: device, revoke: { revoking = device })
-                                .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                        }
-                        .animation(.snappy(duration: 0.3), value: administration.devices.map(\.id))
-                    }
-                    .disabled(administration.busy)
-                    .animation(.snappy(duration: 0.3), value: administration.issued != nil)
+                    PublicReadCard(administration: administration, confirmPublic: $confirmPublic)
+                    DevicesCard(administration: administration, deviceName: $deviceName, revoking: $revoking)
                 }
             } else {
-                Section {
-                    ContentUnavailableView("没有选中的管理连接", systemImage: "server.rack", description: Text("输入服务地址，以及部署时的初始化令牌或已有管理凭证。普通上报凭证不能用在这里。"))
+                EmptyService(connect: { connecting = true })
+            }
+        }
+        .toolbar {
+            if !model.configuration.managedReceivers.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { connecting = true } label: { Label("连接服务…", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
                 }
             }
         }
-        .formStyle(.grouped)
+        .onAppear {
+            if selectedID == nil { selectedID = model.configuration.managedReceivers.first?.id }
+        }
         .task(id: selectedID) { await administration.select(selectedID) }
         .sheet(isPresented: $connecting) {
             ReceiverConnectSheet(model: model) { receiver in selectedID = receiver.id }
@@ -128,12 +62,160 @@ struct ReceiverView: View {
         .alert("移除本机管理连接？", isPresented: $confirmRemoval) {
             Button("移除", role: .destructive) {
                 if let receiver = administration.receiver { model.removeReceiver(receiver) }
-                selectedID = nil
+                selectedID = model.configuration.managedReceivers.first { $0.id != selectedID }?.id
             }
             Button("取消", role: .cancel) {}
         } message: {
             Text("只删除本机保存的管理凭证，不删除服务器或撤销设备。请先确认已安全备份管理凭证；初始化令牌不能再次用于登录。")
         }
+    }
+}
+
+// MARK: - 空状态
+
+private struct EmptyService: View {
+    let connect: () -> Void
+
+    var body: some View {
+        Card {
+            VStack(spacing: 14) {
+                IconBadge(symbol: "server.rack", tint: .gray, size: 52)
+                VStack(spacing: 6) {
+                    Text("还没有连接接收服务").font(.title3.weight(.semibold))
+                    Text("输入服务地址，以及部署时的初始化令牌或已有的所有者管理凭证。普通上报凭证不能用在这里。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 420)
+                }
+                Button("连接服务…", systemImage: "link", action: connect)
+                    .prominentAction()
+                    .controlSize(.large)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 30)
+            .padding(.horizontal, 20)
+        }
+    }
+}
+
+// MARK: - 管理连接
+
+@MainActor
+private struct ServiceCard: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var administration: ReceiverAdministration
+    let receiver: ManagedReceiver
+    @Binding var selectedID: UUID?
+    @Binding var confirmRemoval: Bool
+
+    var body: some View {
+        Card {
+            HStack(spacing: 12) {
+                IconBadge(symbol: "server.rack", tint: .gray, size: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    if model.configuration.managedReceivers.count > 1 {
+                        Picker("接收服务", selection: $selectedID) {
+                            ForEach(model.configuration.managedReceivers) { Text($0.name).tag(Optional($0.id)) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    } else {
+                        Text(receiver.name).font(.headline).lineLimit(1)
+                    }
+                    Text(receiver.baseURL)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 8)
+                if administration.busy { ProgressView().controlSize(.small) }
+                Button { Task { await administration.select(receiver.id) } } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .secondaryAction()
+                .disabled(administration.busy)
+                Menu {
+                    Button("复制管理凭证", systemImage: "doc.on.doc") { administration.copyOwnerCredential() }
+                    Button("移除本机管理连接…", systemImage: "trash", role: .destructive) { confirmRemoval = true }
+                } label: {
+                    Label("更多", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .disabled(administration.busy)
+            }
+            .padding(16)
+            if let notice = administration.notice {
+                Divider()
+                Label(notice, systemImage: "bubble.left.fill")
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(16)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: administration.notice)
+    }
+}
+
+// MARK: - 公开读取
+
+@MainActor
+private struct PublicReadCard: View {
+    @ObservedObject var administration: ReceiverAdministration
+    @Binding var confirmPublic: Bool
+
+    private var dirty: Bool { administration.settings != administration.savedSettings }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("公开读取")
+            Card(tint: administration.settings.publicReadEnabled ? .orange : nil) {
+                HStack(spacing: 12) {
+                    IconBadge(symbol: "globe", tint: administration.settings.publicReadEnabled ? .orange : .blue, size: 34)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("允许匿名读取当前状态").font(.headline)
+                        Text(administration.settings.publicReadEnabled
+                             ? "已开启：任何能访问 API 的人都可能读取所有获准设备的当前状态。"
+                             : "关闭时仅所有者可读取。")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    Toggle("允许匿名读取当前状态", isOn: $administration.settings.publicReadEnabled)
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                .padding(16)
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("允许的浏览器 Origin").font(.subheadline.weight(.semibold))
+                    TextField("每行一个，例如 https://blog.example", text: origins, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...5)
+                        .autocorrectionDisabled()
+                    Footnote("CORS 只是浏览器跨域规则，不是身份验证。留空不会禁止无 Origin 的客户端读取。")
+                }
+                .padding(16)
+                Divider()
+                HStack {
+                    if dirty { Label("有未保存的更改", systemImage: "circle.fill").font(.subheadline).foregroundStyle(.orange) }
+                    Spacer()
+                    Button("保存公开设置") {
+                        if administration.settings.publicReadEnabled && !administration.savedSettings.publicReadEnabled {
+                            confirmPublic = true
+                        } else { Task { await administration.saveSettings() } }
+                    }
+                    .prominentAction()
+                    .disabled(!dirty)
+                }
+                .padding(16)
+            }
+        }
+        .disabled(administration.busy)
     }
 
     private var origins: Binding<String> {
@@ -143,36 +225,77 @@ struct ReceiverView: View {
     }
 }
 
+// MARK: - 授权设备
+
 @MainActor
-private struct IssuedDeviceCard: View {
+private struct DevicesCard: View {
+    @ObservedObject var administration: ReceiverAdministration
+    @Binding var deviceName: String
+    @Binding var revoking: ReceiverDevice?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("授权设备", caption: "设备名由你填写，不自动使用主机名或硬件标识。设备凭证只用于上报，不能管理实例。")
+            Card {
+                HStack(spacing: 10) {
+                    TextField("公开设备名称", text: $deviceName)
+                        .textFieldStyle(.roundedBorder)
+                    Button("签发设备凭证") { Task { await administration.createDevice(name: deviceName) } }
+                        .prominentAction()
+                        .disabled(deviceName.isEmpty || administration.issued != nil)
+                }
+                .padding(16)
+                if let issued = administration.issued {
+                    Divider()
+                    IssuedDeviceNotice(issued: issued, administration: administration)
+                        .padding(16)
+                        .transition(.opacity)
+                }
+                Divider()
+                if administration.devices.isEmpty {
+                    Text("尚未授权设备；签发凭证不会自动分享任何活动。")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .cardRow()
+                } else {
+                    ForEach(Array(administration.devices.enumerated()), id: \.element.id) { index, device in
+                        if index > 0 { CardDivider() }
+                        DeviceRow(device: device, revoke: { revoking = device })
+                    }
+                }
+            }
+            .animation(.snappy(duration: 0.3), value: administration.devices.map(\.id))
+            .animation(.snappy(duration: 0.3), value: administration.issued != nil)
+        }
+        .disabled(administration.busy)
+    }
+}
+
+@MainActor
+private struct IssuedDeviceNotice: View {
     let issued: CreatedDevice
     @ObservedObject var administration: ReceiverAdministration
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("新授权设备", value: issued.device.displayName)
+        VStack(alignment: .leading, spacing: 10) {
+            Label("已为“\(issued.device.displayName)”签发凭证", systemImage: "key.fill")
+                .font(.subheadline.weight(.semibold))
             SecureField("一次性返回的设备凭证", text: .constant(issued.token))
                 .textFieldStyle(.roundedBorder)
             HStack(spacing: 8) {
-                Button {
-                    administration.copyIssuedCredential()
-                } label: {
+                Button { administration.copyIssuedCredential() } label: {
                     Label("复制设备凭证", systemImage: "doc.on.doc")
                 }
-                .glassAction()
-                Button {
-                    administration.addIssuedToThisMac()
-                } label: {
+                .secondaryAction()
+                Button { administration.addIssuedToThisMac() } label: {
                     Label("添加到本机接收端，暂不启用", systemImage: "plus.viewfinder")
                 }
-                .prominentAction()
+                .secondaryAction()
             }
-            Label("刷新页面后不会再次显示此凭证。为其他设备签发时，请安全传递后再刷新。", systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.orange)
+            Footnote("此凭证只显示这一次，离开本页或刷新后无法再次查看。为其他设备签发时，请先安全传递。", symbol: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .surfaceCard(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(14)
+        .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -182,21 +305,23 @@ private struct DeviceRow: View {
     let revoke: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "laptopcomputer.and.iphone")
-                .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            IconBadge(symbol: "laptopcomputer", tint: .teal, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.displayName)
                 Text(device.id)
-                    .font(.caption.monospaced())
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
             Spacer()
-            Button("撤销…", role: .destructive, action: revoke)
+            Button("撤销…", role: .destructive, action: revoke).secondaryAction()
         }
+        .cardRow()
     }
 }
+
+// MARK: - 连接服务
 
 @MainActor
 private struct ReceiverConnectSheet: View {
@@ -213,28 +338,42 @@ private struct ReceiverConnectSheet: View {
     @State private var confirmDiscard = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("连接 Nowbeam 接收服务").font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                IconBadge(symbol: "server.rack", tint: .gray, size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("连接 Nowbeam 接收服务").font(.title3.weight(.semibold))
+                    Text("首次初始化只可执行一次，会返回独立的所有者管理凭证。").font(.callout).foregroundStyle(.secondary)
+                }
+            }
             Form {
-                TextField("本地名称", text: $name)
+                TextField("本地名称", text: $name, prompt: Text("例如：家里的服务器"))
                 TextField("服务地址", text: $baseURL, prompt: Text("https://receiver.example"))
                     .autocorrectionDisabled()
                 Toggle("这是尚未初始化的新实例", isOn: $initialize)
                 SecureField(initialize ? "部署时配置的初始化令牌" : "所有者管理凭证", text: $token)
                     .autocorrectionDisabled()
             }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
             .disabled(busy || unsavedOwner != nil)
-            Text("首次初始化只可执行一次，会返回独立管理凭证。不会开放匿名读取，也不会自动创建设备或开始分享。")
-                .font(.callout).foregroundStyle(.secondary)
-            if let notice { Text(notice).font(.callout).textSelection(.enabled) }
+            Footnote("初始化不会开放匿名读取，也不会自动创建设备或开始分享。")
+            if let notice { Label(notice, systemImage: "bubble.left.fill").font(.callout).textSelection(.enabled) }
             if let unsavedOwner {
-                SecureField("尚未成功保存的管理凭证", text: .constant(unsavedOwner))
-                Button("复制并安全备份管理凭证") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(unsavedOwner, forType: .string)
+                VStack(alignment: .leading, spacing: 10) {
+                    SecureField("尚未成功保存的管理凭证", text: .constant(unsavedOwner))
+                        .textFieldStyle(.roundedBorder)
+                    Button("复制并安全备份管理凭证") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(unsavedOwner, forType: .string)
+                    }
+                    .secondaryAction()
+                    Footnote("初始化已完成，但本机保存失败。请先备份，不能再用初始化令牌登录。剪贴板可能被其他应用读取。",
+                             symbol: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                 }
-                Text("初始化已完成，但本机保存失败。请先备份，不能再用初始化令牌登录。剪贴板可能被其他应用读取。")
-                    .font(.callout).foregroundStyle(.secondary)
+                .padding(14)
+                .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
@@ -252,7 +391,7 @@ private struct ReceiverConnectSheet: View {
                 .disabled(busy || name.isEmpty || baseURL.isEmpty || token.isEmpty)
             }
         }
-        .padding(24).frame(width: 560)
+        .padding(24).frame(width: 540)
         .interactiveDismissDisabled(busy || unsavedOwner != nil)
         .alert("关闭尚未保存的凭证？", isPresented: $confirmDiscard) {
             Button("已安全备份，关闭", role: .destructive) { dismiss() }

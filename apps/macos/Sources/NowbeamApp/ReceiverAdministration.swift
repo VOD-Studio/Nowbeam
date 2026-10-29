@@ -79,7 +79,7 @@ final class ReceiverAdministration: ObservableObject {
         await execute({ client in try await client.createDevice(displayName: name) }, apply: { device in
             self.issued = device
             self.devices.append(device.device)
-            self.notice = "设备已授权。凭证仅返回一次；尚未添加目的地，也没有启用分享。"
+            self.notice = "设备已授权。凭证仅返回一次；尚未添加到接收端，也没有启用分享。"
         })
     }
 

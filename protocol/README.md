@@ -1,6 +1,6 @@
 # Nowbeam 上报协议 v1
 
-本文是接收方接入的规范；`MUST` / `MUST NOT` / `SHOULD` 按 RFC 2119 理解。当前尚无已完成的产品实现。消息结构由 [JSON Schema](v1/message.schema.json) 定义，示例见 [examples.json](v1/examples.json)。Schema 只能校验单条消息，不能替代下文的连接归属、顺序、时间和授权规则。
+本文是接收方接入的规范；`MUST` / `MUST NOT` / `SHOULD` 按 RFC 2119 理解。原生客户端与可选独立接收服务已有实现，本规范是它们共同遵守的契约。消息结构由 [JSON Schema](v1/message.schema.json) 定义，示例见 [examples.json](v1/examples.json)。Schema 只能校验单条消息，不能替代下文的连接归属、顺序、时间和授权规则。
 
 ## 1. 角色与前提
 
