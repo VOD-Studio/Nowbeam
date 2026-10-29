@@ -102,7 +102,7 @@ def main() -> None:
     parser.add_argument("--skip-dmg", action="store_true")
     parser.add_argument("--bundle-id", default="local.nowbeam.development")
     parser.add_argument("--sign-identity", default="-")
-    parser.add_argument("--version", default="0.1.0", help="CFBundleShortVersionString，形如 1.2.3")
+    parser.add_argument("--version", default=(ROOT / "VERSION").read_text().strip(), help="CFBundleShortVersionString，形如 1.2.3，默认读取根目录 VERSION")
     parser.add_argument("--build", default="1", help="CFBundleVersion，纯数字构建号")
     parser.add_argument("--output", type=Path, default=ROOT / "dist", help="输出目录，默认仓库内 dist/")
     args = parser.parse_args()
