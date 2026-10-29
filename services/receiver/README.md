@@ -58,7 +58,7 @@ NOWBEAM_BOOTSTRAP_TOKEN_FILE="$HOME/.config/nowbeam-receiver/bootstrap" bin/nowb
 
 ## 容器与两个独立实例
 
-仓库根目录是 Docker build context。镜像从源码构建；构建阶段固定在构建机架构并用 Go 交叉编译目标架构，多平台构建不需要 QEMU。从 0.1.0 起，维护者推送 `vX.Y.Z` 标签时，发布工作流会把 linux/amd64 与 linux/arm64 镜像推送到 `ghcr.io/<所有者小写>/nowbeam-receiver:<版本>`（不提供 `latest`）。GHCR 的包首次推送默认私有，需要维护者在包设置中改为公开后才能匿名拉取。镜像使用非 root 用户、无 shell 的 scratch 运行层，SQLite 不需要 CGO。
+仓库根目录是 Docker build context。镜像从源码构建；构建阶段固定在构建机架构并用 Go 交叉编译目标架构，多平台构建不需要 QEMU。从 0.1.0 起，合并到 `main` 且根目录 `VERSION` 出现新版本号时，发布工作流会把 linux/amd64 与 linux/arm64 镜像推送到 `ghcr.io/<所有者小写>/nowbeam-receiver:<版本>`（不提供 `latest`）。GHCR 的包首次推送默认私有，需要维护者在包设置中改为公开后才能匿名拉取。镜像使用非 root 用户、无 shell 的 scratch 运行层，SQLite 不需要 CGO。
 
 ```sh
 docker build -f services/receiver/Dockerfile -t nowbeam-receiver:local .

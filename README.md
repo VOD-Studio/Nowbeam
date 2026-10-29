@@ -155,12 +155,11 @@ make test                                     # 聚合两端行为测试
 
 ## 发布
 
-发布由 [release.yml](.github/workflows/release.yml) 完成，**只能由维护者**在 `main` 的提交上推送版本标签触发：
+发布由 [release.yml](.github/workflows/release.yml) 自动完成，版本号只来自仓库根目录的 [`VERSION`](VERSION)：
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
+1. 要发新版本，在 PR 中把 `VERSION` 改成新的 `主.次.修订`（只能提高；`make check` 会校验格式）。
+2. PR 合并到 `main` 后，流水线发现 `v<VERSION>` 标签还不存在，就自动构建、发布并创建该标签；`VERSION` 没变的合并不会发布。
+3. 涉及发布的 PR（改动 `release.yml`、`VERSION`、打包脚本或接收服务 Dockerfile）会在合并前演练一次完整构建，但不发布。
 
 流水线会先复核检查与测试，再构建并发布以下内容，GitHub Release 一律标记为**预发布**：
 
@@ -171,7 +170,7 @@ git push origin v0.1.0
 | `ghcr.io/<所有者>/nowbeam-receiver:<版本>` | 接收服务多平台镜像（首次推送默认私有，需维护者在包设置中公开） |
 | `SHA256SUMS` | 以上文件的校验和 |
 
-在 GitHub 的 Actions 页面手动运行 “Release” 只会构建并保留产物，不发布，可用来演练。版本号以标签为准，客户端的 `CFBundleShortVersionString` 与之一致。Developer ID 签名与公证需要维护者提供身份和凭据，尚未接入。
+在 GitHub 的 Actions 页面手动运行 “Release” 同样只演练。客户端的 `CFBundleShortVersionString` 与 `VERSION` 一致。发布失败时标签不会创建，修复后下一次推送到 `main` 会自动重试；若镜像已推送，会被同版本号覆盖。Developer ID 签名与公证需要维护者提供身份和凭据，尚未接入。
 
 ## 隐私与安全
 

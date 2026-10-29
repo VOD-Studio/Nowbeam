@@ -26,7 +26,7 @@ TEXT_SUFFIXES = {
 }
 TEXT_NAMES = {
     "Makefile", ".editorconfig", ".gitignore", ".gitattributes",
-    "Dockerfile", ".dockerignore", "go.mod", "go.sum",
+    "Dockerfile", ".dockerignore", "go.mod", "go.sum", "VERSION",
 }
 DELETE = object()
 
@@ -229,6 +229,8 @@ def check_repository():
         destination = (path.parent / parent.group(1)).resolve()
         if destination.name != "AGENTS.md" or not destination.is_file() or destination.parent not in path.parents:
             raise ValueError(f"无效父指令引用：{path.relative_to(ROOT)}")
+    if not re.fullmatch(r"\d+\.\d+\.\d+\n", (ROOT / "VERSION").read_text()):
+        raise ValueError("VERSION 必须只含一行 主.次.修订，例如 0.1.0")
     directories = {path.parent for path in files}
     for directory in directories:
         if not (directory / "AGENTS.md").is_file():

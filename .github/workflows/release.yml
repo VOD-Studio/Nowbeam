@@ -1,11 +1,18 @@
 name: Release
 
-# 推送 vX.Y.Z 标签发布预发布版（客户端 ad-hoc 签名、未公证）；手动运行只构建并保留产物，不发布。
-# 版本号以标签为准，并且标签必须指向 main 上的提交。
+# 合并到 main 后，若根目录 VERSION 的版本号还没有对应标签，就自动构建并发布预发布版
+# （客户端 ad-hoc 签名、未公证），同时创建 vX.Y.Z 标签；已发布过的版本号会直接跳过。
+# 涉及发布的改动在 PR 与手动运行时只做演练：完整构建并保留产物，但不推送镜像、不创建 Release。
 
 on:
   push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+    branches: [main]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - VERSION
+      - scripts/build_macos.py
+      - services/receiver/Dockerfile
   workflow_dispatch:
 
 permissions:
@@ -21,6 +28,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      build: ${{ steps.version.outputs.build }}
       publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -29,23 +37,38 @@ jobs:
           persist-credentials: false
       - id: version
         env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ "$REF_TYPE" = tag ]; then
-            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-              echo "标签 $REF_NAME 指向的提交不在 main 上，拒绝发布。" >&2
-              exit 1
-            fi
-            echo "version=${REF_NAME#v}" >> "$GITHUB_OUTPUT"
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0" >> "$GITHUB_OUTPUT"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+          version=$(cat VERSION)
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "VERSION 必须是 主.次.修订，当前为：$version" >&2
+            exit 1
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" != push ]; then
+            echo "演练：构建 ${version}，但不发布。"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+            echo "v$version 已发布过，跳过。要发新版本，请在 PR 中提高 VERSION。"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | sort -V | tail -1)
+          if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$latest" "$version" | sort -V | tail -1)" != "$version" ]; then
+            echo "VERSION ${version} 低于已发布的 v${latest}，拒绝发布。" >&2
+            exit 1
+          fi
+          echo "将发布 v${version}。"
+          echo "build=true" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
 
   verify:
     needs: prepare
+    if: needs.prepare.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -200,7 +223,7 @@ jobs:
           (cd artifacts && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nowbeam-receiver:$VERSION"
           cat > notes.md <<EOF
-          这是 Nowbeam $VERSION 的**预发布版**，尚未完成正式签名与公证，也还有多项真实环境验收未完成，详见[项目状态](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/README.md#项目状态)。
+          这是 Nowbeam $VERSION 的**预发布版**，尚未完成正式签名与公证，也还有多项真实环境验收未完成，详见[项目状态](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/README.md#项目状态)。
 
           ## 下载
 
@@ -216,11 +239,12 @@ jobs:
           ## 已知限制
 
           - 客户端未经 Developer ID 签名和公证，首次打开会被 Gatekeeper 拦截。可在「系统设置 → 隐私与安全性」中对该应用选择「仍要打开」；不要关闭 Gatekeeper 或系统完整性保护。
-          - 接收服务部署、TLS 与初始化见[接收服务指南](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/services/receiver/README.md)。
+          - 接收服务部署、TLS 与初始化见[接收服务指南](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/services/receiver/README.md)。
           EOF
       - name: 创建 GitHub Release（预发布）
         run: |
-          gh release create "$GITHUB_REF_NAME" artifacts/* \
-            --verify-tag --prerelease \
+          # 标签在这里随 Release 一并创建，是整条流水线最后的提交点；失败时下次推送到 main 会重试。
+          gh release create "v$VERSION" artifacts/* \
+            --target "$GITHUB_SHA" --prerelease \
             --title "Nowbeam $VERSION" \
-            --notes-file notes.md
+            --notes-file notes.md --generate-notes
